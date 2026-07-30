@@ -1,95 +1,28 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
-#include <stdlib.h>
-#include <sys/stat.h>
 
-#include "sqlite3.h"
+#include "db.h"
 
 #define shift_args(argc, argv) ((argc)--, *(argv)++)
 
-#define DB_FILE_NAME "tick.db"
-#define DB_INIT_STR \
-    "PRAGMA journal_mode = WAL;" \
-    "CREATE TABLE IF NOT EXISTS entries (" \
-    "   entry_id   INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,"\
-    "   start_time INTEGER DEFAULT (unixepoch())," \
-    "   stop_time  INTEGER DEFAULT (unixepoch())," \
-    "   comment    TEXT" \
-    ") STRICT;" \
-    "CREATE TABLE IF NOT EXISTS tags (" \
-    "   tag_id     INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL," \
-    "   name       TEXT NOT NULL" \
-    ");" \
-    "CREATE TABLE IF NOT EXISTS entry_tags (" \
-    "   entry_id   INTEGER," \
-    "   tag_id     INTEGER," \
-    "   FOREIGN KEY (entry_id) REFERENCES entries(entry_id)," \
-    "   FOREIGN KEY (tag_id) REFERENCES entries(tag_id)," \
-    "   PRIMARY KEY (entry_id, tag_id)" \
-    ");"
-
-static sqlite3* init_db(void)
+int perform_start(sqlite3 *db)
 {
-    sqlite3 *db = NULL;
+    (void) db;
 
-    const char *home = getenv("HOME");
-    if(!home || strlen(home) == 0)
-    {
-        fprintf(stderr, "ERROR: could not aquire HOME\n");
-        goto err;
-    }
 
-    char db_dir[1024];
-    char db_path[2048];
-    snprintf(db_dir, sizeof(db_dir), "%s/.local/share/tick", home);
-    mkdir(db_dir, 0700);
-    snprintf(db_path, sizeof(db_path), "%s/%s", db_dir, DB_FILE_NAME);
-
-    if(sqlite3_open_v2(
-                db_path, 
-                &db, 
-                SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, 
-                NULL
-            ) != SQLITE_OK)
-    {
-        fprintf(stderr, "ERROR: could not open database at path %s\n", DB_FILE_NAME);
-        goto err;
-    }
-
-    char *errmsg = NULL;
-    if(sqlite3_exec(db, DB_INIT_STR, NULL, NULL, &errmsg) != SQLITE_OK)
-    {
-        fprintf(stderr, "ERROR: could not initialize database: %s\n", errmsg);
-        goto err;
-    }
-
-    return db;
-
-err:
-    if(db) sqlite3_close(db);
-    return NULL;
+    return 0;    
 }
 
-int main(int argc, char **argv)
+int handle_subcommands(sqlite3 *db, int argc, char **argv)
 {
-    const char *program = shift_args(argc, argv);
-    if(0 == argc)
-    {
-        fprintf(stderr, "USAGE %s <subcommand> <options>\n", program);
-        return 1;
-    }
-
-    sqlite3 *db = init_db();
-    assert(db);
-
     while(argc > 0)
     {
         const char *flag = shift_args(argc, argv);
 
         if(0 == strcmp(flag, "start"))
         {
-
+            perform_start(db);
         }
         else if(0 == strcmp(flag, "stop"))
         {
@@ -108,6 +41,23 @@ int main(int argc, char **argv)
             assert(0 && "Not implemented");
         }
     }
+
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    const char *program = shift_args(argc, argv);
+    if(0 == argc)
+    {
+        fprintf(stderr, "USAGE %s <subcommand> <options>\n", program);
+        return 1;
+    }
+
+    sqlite3 *db = db_init();
+    assert(db);
+
+    handle_subcommands(db, argc, argv);
 
     sqlite3_close(db);
     
