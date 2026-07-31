@@ -37,103 +37,16 @@
 #define DB_INSERT_TAG   "INSERT INTO tags (name) VALUES (?);"
 #define DB_DELETE_TAG   "DELETE FROM tags WHERE tag_id = ?;"
 
-struct entry_add_args  
-{ 
-    time_t start; 
-    time_t stop; 
-    const char *comment; 
-};
-
-struct entry_start_args 
-{ 
-    time_t start; 
-    const char *comment; 
-};
-
-struct entry_stop_args  
-{ 
-    int64_t id; 
-    time_t stop; 
-};
-
-static int mkdir_p(const char *path, mode_t mode)
+static int db_bind_time(sqlite3_stmt *stmt, int pos, time_t time)
 {
-    char tmp[1024];
-    char *p = NULL;
-    size_t len;
-
-    snprintf(tmp, sizeof(tmp), "%s", path);
-    len = strlen(tmp);
-    if (len > 0 && tmp[len - 1] == '/') tmp[len - 1] = 0;
-
-    for (p = tmp + 1; *p; p++) 
+    if(time >= 0)
     {
-        if (*p == '/') 
-        {
-            *p = 0;
-            if (mkdir(tmp, mode) != 0 && errno != EEXIST) return -1;
-            *p = '/';
-        }
+        return sqlite3_bind_int64(stmt, pos, time);
     }
-    if (mkdir(tmp, mode) != 0 && errno != EEXIST) return -1;
-
-    return 0;
-}
-
-static int db_exec_stmt(sqlite3 *db, const char *sql, void (*bind_fn)(sqlite3_stmt*, void*), void *arg)
-{
-    sqlite3_stmt *stmt = NULL;
-
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) 
+    else
     {
-        fprintf(stderr, "ERROR: prepare failed: %s\n", sqlite3_errmsg(db));
-        return 1;
+        return sqlite3_bind_null(stmt, pos);
     }
-
-    if (bind_fn) bind_fn(stmt, arg);
-
-    int rc = sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-
-    if (rc != SQLITE_DONE) 
-    {
-        fprintf(stderr, "ERROR: execution failed: %s\n", sqlite3_errmsg(db));
-        return 1;
-    }
-
-    return 0;
-}
-
-static void bind_entry_add(sqlite3_stmt *stmt, void *arg) 
-{
-    struct entry_add_args *a = arg;
-    sqlite3_bind_int64(stmt, 1, (sqlite3_int64)a->start);
-    sqlite3_bind_int64(stmt, 2, (sqlite3_int64)a->stop);
-    sqlite3_bind_text(stmt, 3, a->comment, -1, SQLITE_STATIC);
-}
-
-static void bind_entry_start(sqlite3_stmt *stmt, void *arg) 
-{
-    struct entry_start_args *a = arg;
-    sqlite3_bind_int64(stmt, 1, (sqlite3_int64)a->start);
-    sqlite3_bind_text(stmt, 2, a->comment, -1, SQLITE_STATIC);
-}
-
-static void bind_entry_stop(sqlite3_stmt *stmt, void *arg) 
-{
-    struct entry_stop_args *a = arg;
-    sqlite3_bind_int64(stmt, 1, (sqlite3_int64)a->stop);
-    sqlite3_bind_int64(stmt, 2, (sqlite3_int64)a->id);
-}
-
-static void bind_single_id(sqlite3_stmt *stmt, void *arg) 
-{
-    sqlite3_bind_int64(stmt, 1, *(int64_t*)arg);
-}
-
-static void bind_single_text(sqlite3_stmt *stmt, void *arg) 
-{
-    sqlite3_bind_text(stmt, 1, (const char*)arg, -1, SQLITE_STATIC);
 }
 
 sqlite3* db_init(void)
@@ -142,83 +55,203 @@ sqlite3* db_init(void)
     char *errmsg = NULL;
 
     const char *home = getenv("HOME");
-    if (!home || home[0] == '\0') 
+    if (!home || strlen(home) == 0)
     {
         fprintf(stderr, "ERROR: could not acquire HOME directory\n");
-        return NULL;
+        goto err;
     }
 
     char db_dir[1024];
     char db_path[2048];
     snprintf(db_dir, sizeof(db_dir), "%s/.local/share/tick", home);
-    
-    if (mkdir_p(db_dir, 0700) != 0) 
-    {
-        fprintf(stderr, "ERROR: failed to create directory %s\n", db_dir);
-        return NULL;
-    }
-
+    mkdir(db_dir, 0700);
     snprintf(db_path, sizeof(db_path), "%s/%s", db_dir, DB_FILE_NAME);
 
-    if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL) != SQLITE_OK) 
+    if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL) != SQLITE_OK)
     {
         fprintf(stderr, "ERROR: could not open database at %s: %s\n", db_path, sqlite3_errmsg(db));
-        if (db) sqlite3_close(db);
-        return NULL;
+        goto err;
     }
 
-    if (sqlite3_exec(db, DB_INIT_STR, NULL, NULL, &errmsg) != SQLITE_OK) 
+    if (sqlite3_exec(db, DB_INIT_STR, NULL, NULL, &errmsg) != SQLITE_OK)
     {
         fprintf(stderr, "ERROR: could not initialize database schema: %s\n", errmsg);
-        sqlite3_free(errmsg);
-        sqlite3_close(db);
-        return NULL;
+        goto err;
     }
 
     return db;
+
+err:
+    if(db) sqlite3_close(db);
+    if(errmsg) sqlite3_free(errmsg);
+
+    return NULL;
 }
 
-int db_entries_add(sqlite3 *db, time_t start_time, time_t stop_time, const char *comment, int64_t *entry_id)
+int db_entries_add_impl(DB *db, int64_t *entry_id, time_t start_time, time_t stop_time, const char *comment)
 {
-    struct entry_add_args args = { start_time, stop_time, comment };
-    if (db_exec_stmt(db, DB_INSERT_ENTRY, bind_entry_add, &args) != 0) return 1;
+    sqlite3_stmt *stmt = NULL;
 
-    if (entry_id) *entry_id = sqlite3_last_insert_rowid(db);
+    if(sqlite3_prepare(db, DB_INSERT_ENTRY, -1, &stmt, NULL) != SQLITE_OK)
+    {
+        fprintf(stderr, "ERROR: could not prepare entry insert: %s", sqlite3_errmsg(db));
+        goto err;
+    }
 
+    if(db_bind_time(stmt, 0, start_time) != SQLITE_OK ||
+        db_bind_time(stmt, 1, stop_time) != SQLITE_OK ||
+        sqlite3_bind_text(stmt, 2, comment, -1, SQLITE_STATIC) != SQLITE_OK)
+    {
+        fprintf(stderr, "ERROR: could not bind parameters: %s", sqlite3_errmsg(db));
+        goto err;
+    }
+
+    if(sqlite3_step(stmt) != SQLITE_OK)
+    {
+        fprintf(stderr, "ERROR: could not prepare entry insert: %s", sqlite3_errmsg(db));
+        goto err;
+    }
+
+    *entry_id = sqlite3_last_insert_rowid(db);
+
+    sqlite3_finalize(stmt);
     return 0;
+
+err:
+    if(stmt) sqlite3_finalize(stmt);
+    return 1;
 }
 
-int db_entries_start(sqlite3 *db, time_t start_time, const char *comment, int64_t *entry_id)
+int db_entries_add(DB *db, int64_t *entry_id, time_t start_time, time_t stop_time, const char *comment)
 {
-    struct entry_start_args args = { start_time, comment };
-    if (db_exec_stmt(db, DB_START_ENTRY, bind_entry_start, &args) != 0) return 1;
+    return db_entries_add_impl(db, entry_id, start_time, stop_time, comment);
+}
 
-    if (entry_id) *entry_id = sqlite3_last_insert_rowid(db);
+int db_entries_start(DB *db, int64_t *entry_id, time_t start_time, const char *comment)
+{
+    return db_entries_add_impl(db, entry_id, start_time, -1, comment);
+}
 
+int db_entries_stop(DB *db, int64_t entry_id, time_t stop_time)
+{
+    sqlite3_stmt *stmt = NULL;
+
+    if(sqlite3_prepare(db, DB_STOP_ENTRY, -1, &stmt, NULL) != SQLITE_OK)
+    {
+        fprintf(stderr, "ERROR: could not prepare entry update: %s", sqlite3_errmsg(db));
+        goto err;
+    }
+
+    if(db_bind_time(stmt, 0, stop_time) != SQLITE_OK ||
+        sqlite3_bind_int64(stmt, 1, (sqlite3_int64) entry_id) != SQLITE_OK)
+    {
+        fprintf(stderr, "ERROR: could not bind parameters: %s", sqlite3_errmsg(db));
+        goto err;
+    }
+
+    if(sqlite3_step(stmt) != SQLITE_OK)
+    {
+        fprintf(stderr, "ERROR: could not prepare entry insert: %s", sqlite3_errmsg(db));
+        goto err;
+    }
+
+    sqlite3_finalize(stmt);
     return 0;
+
+err:
+    if(stmt) sqlite3_finalize(stmt);
+    return 1;
 }
 
-int db_entries_stop(sqlite3 *db, int64_t entry_id, time_t stop_time)
+int db_entries_delete(DB *db, int64_t entry_id)
 {
-    struct entry_stop_args args = { entry_id, stop_time };
-    return db_exec_stmt(db, DB_STOP_ENTRY, bind_entry_stop, &args);
-}
+    sqlite3_stmt *stmt = NULL;
 
-int db_entries_delete(sqlite3 *db, int64_t entry_id)
-{
-    return db_exec_stmt(db, DB_DELETE_ENTRY, bind_single_id, &entry_id);
-}
+    if(sqlite3_prepare(db, DB_DELETE_ENTRY, -1, &stmt, NULL) != SQLITE_OK)
+    {
+        fprintf(stderr, "ERROR: could not prepare entry update: %s", sqlite3_errmsg(db));
+        goto err;
+    }
 
-int db_tags_add(sqlite3 *db, const char *name, int64_t *tag_id)
-{
-    if (db_exec_stmt(db, DB_INSERT_TAG, bind_single_text, (void*)name) != 0) return 1;
+    if(sqlite3_bind_int64(stmt, 0, (sqlite3_int64) entry_id) != SQLITE_OK)
+    {
+        fprintf(stderr, "ERROR: could not bind parameters: %s", sqlite3_errmsg(db));
+        goto err;
+    }
 
-    if (tag_id) *tag_id = sqlite3_last_insert_rowid(db);
+    if(sqlite3_step(stmt) != SQLITE_OK)
+    {
+        fprintf(stderr, "ERROR: could not prepare entry insert: %s", sqlite3_errmsg(db));
+        goto err;
+    }
 
+    sqlite3_finalize(stmt);
     return 0;
+
+err:
+    if(stmt) sqlite3_finalize(stmt);
+    return 1;
 }
 
-int db_tags_delete(sqlite3 *db, int64_t tag_id)
+int db_tags_add(DB *db, int64_t *tag_id, const char *name)
 {
-    return db_exec_stmt(db, DB_DELETE_TAG, bind_single_id, &tag_id);
+    sqlite3_stmt *stmt = NULL;
+
+    if(sqlite3_prepare(db, DB_INSERT_TAG, -1, &stmt, NULL) != SQLITE_OK)
+    {
+        fprintf(stderr, "ERROR: could not prepare entry update: %s", sqlite3_errmsg(db));
+        goto err;
+    }
+
+    if(sqlite3_bind_text(stmt, 0, name, -1, SQLITE_STATIC) != SQLITE_OK)
+    {
+        fprintf(stderr, "ERROR: could not bind parameters: %s", sqlite3_errmsg(db));
+        goto err;
+    }
+
+    if(sqlite3_step(stmt) != SQLITE_OK)
+    {
+        fprintf(stderr, "ERROR: could not prepare entry insert: %s", sqlite3_errmsg(db));
+        goto err;
+    }
+
+    *tag_id = sqlite3_last_insert_rowid(db);
+
+    sqlite3_finalize(stmt);
+    return 0;
+
+err:
+    if(stmt) sqlite3_finalize(stmt);
+    return 1;
 }
+
+int db_tags_delete(DB *db, int64_t tag_id)
+{
+    sqlite3_stmt *stmt = NULL;
+
+    if(sqlite3_prepare(db, DB_DELETE_TAG, -1, &stmt, NULL) != SQLITE_OK)
+    {
+        fprintf(stderr, "ERROR: could not prepare entry update: %s", sqlite3_errmsg(db));
+        goto err;
+    }
+
+    if(sqlite3_bind_int64(stmt, 0, (sqlite3_int64) tag_id) != SQLITE_OK)
+    {
+        fprintf(stderr, "ERROR: could not bind parameters: %s", sqlite3_errmsg(db));
+        goto err;
+    }
+
+    if(sqlite3_step(stmt) != SQLITE_OK)
+    {
+        fprintf(stderr, "ERROR: could not prepare entry insert: %s", sqlite3_errmsg(db));
+        goto err;
+    }
+
+    sqlite3_finalize(stmt);
+    return 0;
+
+err:
+    if(stmt) sqlite3_finalize(stmt);
+    return 1;
+}
+
