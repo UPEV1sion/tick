@@ -30,7 +30,9 @@
     ") STRICT;"
 
 #define DB_INSERT_ENTRY "INSERT INTO entries (start_time, stop_time, comment) VALUES (?, ?, ?);"
+// TODO check active tracking
 #define DB_START_ENTRY  "INSERT INTO entries (start_time, comment) VALUES (?, ?);"
+// TODO check active tracking
 #define DB_STOP_ENTRY   "UPDATE entries SET stop_time = ? WHERE entry_id = ?;"
 #define DB_DELETE_ENTRY "DELETE FROM entries WHERE entry_id = ?;"
 
@@ -94,21 +96,21 @@ int db_entries_add_impl(DB *db, int64_t *entry_id, time_t start_time, time_t sto
 
     if(sqlite3_prepare(db, DB_INSERT_ENTRY, -1, &stmt, NULL) != SQLITE_OK)
     {
-        fprintf(stderr, "ERROR: could not prepare entry insert: %s", sqlite3_errmsg(db));
+        fprintf(stderr, "ERROR: could not prepare entry insert: %s\n", sqlite3_errmsg(db));
         goto err;
     }
 
-    if(db_bind_time(stmt, 0, start_time) != SQLITE_OK ||
-        db_bind_time(stmt, 1, stop_time) != SQLITE_OK ||
-        sqlite3_bind_text(stmt, 2, comment, -1, SQLITE_STATIC) != SQLITE_OK)
+    if(db_bind_time(stmt, 1, start_time) != SQLITE_OK ||
+        db_bind_time(stmt, 2, stop_time) != SQLITE_OK ||
+        sqlite3_bind_text(stmt, 3, comment, -1, SQLITE_STATIC) != SQLITE_OK)
     {
-        fprintf(stderr, "ERROR: could not bind parameters: %s", sqlite3_errmsg(db));
+        fprintf(stderr, "ERROR: could not bind parameters: %s\n", sqlite3_errmsg(db));
         goto err;
     }
 
-    if(sqlite3_step(stmt) != SQLITE_OK)
+    if(sqlite3_step(stmt) != SQLITE_DONE)
     {
-        fprintf(stderr, "ERROR: could not prepare entry insert: %s", sqlite3_errmsg(db));
+        fprintf(stderr, "ERROR: could not prepare entry insert: %s\n", sqlite3_errmsg(db));
         goto err;
     }
 
@@ -138,20 +140,20 @@ int db_entries_stop(DB *db, int64_t entry_id, time_t stop_time)
 
     if(sqlite3_prepare(db, DB_STOP_ENTRY, -1, &stmt, NULL) != SQLITE_OK)
     {
-        fprintf(stderr, "ERROR: could not prepare entry update: %s", sqlite3_errmsg(db));
+        fprintf(stderr, "ERROR: could not prepare entry update: %s\n", sqlite3_errmsg(db));
         goto err;
     }
 
-    if(db_bind_time(stmt, 0, stop_time) != SQLITE_OK ||
-        sqlite3_bind_int64(stmt, 1, (sqlite3_int64) entry_id) != SQLITE_OK)
+    if(db_bind_time(stmt, 1, stop_time) != SQLITE_OK ||
+        sqlite3_bind_int64(stmt, 2, (sqlite3_int64) entry_id) != SQLITE_OK)
     {
-        fprintf(stderr, "ERROR: could not bind parameters: %s", sqlite3_errmsg(db));
+        fprintf(stderr, "ERROR: could not bind parameters: %s\n", sqlite3_errmsg(db));
         goto err;
     }
 
     if(sqlite3_step(stmt) != SQLITE_OK)
     {
-        fprintf(stderr, "ERROR: could not prepare entry insert: %s", sqlite3_errmsg(db));
+        fprintf(stderr, "ERROR: could not prepare entry insert: %s\n", sqlite3_errmsg(db));
         goto err;
     }
 
@@ -169,19 +171,19 @@ int db_entries_delete(DB *db, int64_t entry_id)
 
     if(sqlite3_prepare(db, DB_DELETE_ENTRY, -1, &stmt, NULL) != SQLITE_OK)
     {
-        fprintf(stderr, "ERROR: could not prepare entry update: %s", sqlite3_errmsg(db));
+        fprintf(stderr, "ERROR: could not prepare entry update: %s\n", sqlite3_errmsg(db));
         goto err;
     }
 
-    if(sqlite3_bind_int64(stmt, 0, (sqlite3_int64) entry_id) != SQLITE_OK)
+    if(sqlite3_bind_int64(stmt, 1, (sqlite3_int64) entry_id) != SQLITE_OK)
     {
-        fprintf(stderr, "ERROR: could not bind parameters: %s", sqlite3_errmsg(db));
+        fprintf(stderr, "ERROR: could not bind parameters: %s\n", sqlite3_errmsg(db));
         goto err;
     }
 
-    if(sqlite3_step(stmt) != SQLITE_OK)
+    if(sqlite3_step(stmt) != SQLITE_DONE)
     {
-        fprintf(stderr, "ERROR: could not prepare entry insert: %s", sqlite3_errmsg(db));
+        fprintf(stderr, "ERROR: could not prepare entry insert: %s\n", sqlite3_errmsg(db));
         goto err;
     }
 
@@ -199,19 +201,19 @@ int db_tags_add(DB *db, int64_t *tag_id, const char *name)
 
     if(sqlite3_prepare(db, DB_INSERT_TAG, -1, &stmt, NULL) != SQLITE_OK)
     {
-        fprintf(stderr, "ERROR: could not prepare entry update: %s", sqlite3_errmsg(db));
+        fprintf(stderr, "ERROR: could not prepare entry update: %s\n", sqlite3_errmsg(db));
         goto err;
     }
 
-    if(sqlite3_bind_text(stmt, 0, name, -1, SQLITE_STATIC) != SQLITE_OK)
+    if(sqlite3_bind_text(stmt, 1, name, -1, SQLITE_STATIC) != SQLITE_OK)
     {
-        fprintf(stderr, "ERROR: could not bind parameters: %s", sqlite3_errmsg(db));
+        fprintf(stderr, "ERROR: could not bind parameters: %s\n", sqlite3_errmsg(db));
         goto err;
     }
 
-    if(sqlite3_step(stmt) != SQLITE_OK)
+    if(sqlite3_step(stmt) != SQLITE_DONE)
     {
-        fprintf(stderr, "ERROR: could not prepare entry insert: %s", sqlite3_errmsg(db));
+        fprintf(stderr, "ERROR: could not prepare entry insert: %s\n", sqlite3_errmsg(db));
         goto err;
     }
 
@@ -231,19 +233,19 @@ int db_tags_delete(DB *db, int64_t tag_id)
 
     if(sqlite3_prepare(db, DB_DELETE_TAG, -1, &stmt, NULL) != SQLITE_OK)
     {
-        fprintf(stderr, "ERROR: could not prepare entry update: %s", sqlite3_errmsg(db));
+        fprintf(stderr, "ERROR: could not prepare entry update: %s\n", sqlite3_errmsg(db));
         goto err;
     }
 
-    if(sqlite3_bind_int64(stmt, 0, (sqlite3_int64) tag_id) != SQLITE_OK)
+    if(sqlite3_bind_int64(stmt, 1, (sqlite3_int64) tag_id) != SQLITE_OK)
     {
-        fprintf(stderr, "ERROR: could not bind parameters: %s", sqlite3_errmsg(db));
+        fprintf(stderr, "ERROR: could not bind parameters: %s\n", sqlite3_errmsg(db));
         goto err;
     }
 
-    if(sqlite3_step(stmt) != SQLITE_OK)
+    if(sqlite3_step(stmt) != SQLITE_DONE)
     {
-        fprintf(stderr, "ERROR: could not prepare entry insert: %s", sqlite3_errmsg(db));
+        fprintf(stderr, "ERROR: could not prepare entry insert: %s\n", sqlite3_errmsg(db));
         goto err;
     }
 
@@ -255,3 +257,7 @@ err:
     return 1;
 }
 
+void db_close(DB *db)
+{
+    sqlite3_close(db);
+}

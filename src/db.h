@@ -18,4 +18,6 @@ int db_entries_delete(DB *db, int64_t entry_id);
 int db_tags_add(DB *db, int64_t *tag_id, const char *name);
 int db_tags_delete(DB *db, int64_t tag_id);
 
+void db_close(DB *db);
+
 #endif // DB_H_

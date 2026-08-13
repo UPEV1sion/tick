@@ -1,20 +1,31 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#include <time.h>
 
 #include "db.h"
 
 #define shift_args(argc, argv) ((argc)--, *(argv)++)
 
-int perform_start(sqlite3 *db)
+int perform_start(DB *db, const char *comment)
 {
-    (void) db;
-
+    time_t start = time(NULL);
+    
+    int64_t entry_id;
+    db_entries_start(db, &entry_id, start, comment);
 
     return 0;    
 }
 
-int handle_subcommands(sqlite3 *db, int argc, char **argv)
+int perform_tag(DB *db, const char *tag)
+{
+    (void) db;
+    (void) tag;
+
+    return 0;    
+}
+
+int handle_subcommands(DB *db, int argc, char **argv)
 {
     while(argc > 0)
     {
@@ -22,7 +33,8 @@ int handle_subcommands(sqlite3 *db, int argc, char **argv)
 
         if(0 == strcmp(flag, "start"))
         {
-            perform_start(db);
+            // TODO parse comment
+            perform_start(db, NULL);
         }
         else if(0 == strcmp(flag, "stop"))
         {
@@ -40,6 +52,10 @@ int handle_subcommands(sqlite3 *db, int argc, char **argv)
         {
             assert(0 && "Not implemented");
         }
+        else if(0 == strcmp(flag, "sum"))
+        {
+            assert(0 && "Not implemented");
+        }
     }
 
     return 0;
@@ -54,12 +70,12 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    sqlite3 *db = db_init();
+    DB *db = db_init();
     assert(db);
 
     handle_subcommands(db, argc, argv);
 
-    sqlite3_close(db);
+    db_close(db);
     
     return 0;
 }

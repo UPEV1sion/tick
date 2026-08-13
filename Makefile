@@ -1,5 +1,5 @@
 CC := gcc
-CFLAGS := -Wall -Wextra -pedantic -ggdb
+CFLAGS := -Wall -Wextra -Werror -pedantic -ggdb
 
 BUILD_DIR := build
 SRC_DIR := src
